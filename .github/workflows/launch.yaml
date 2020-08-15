@@ -41,3 +41,7 @@ jobs:
       - name: Notify Quint
         working-directory: emc
         run: curl -sX POST "https://push.guvernator.net/message?token=${{ secrets.GOTIFY_TOKEN }}" -F "title=emc" -F "priority=8" -F "message=new server at $(cat state/ec2_ip)"
+
+      - name: Upload key
+        working-directory: emc
+        run: curl -su "${{ secrets.NEXTCLOUD_USER }}:${{ secrets.NEXTCLOUD_PASSWORD }}" -T state/minecraft.pem "https://${{ secrets.NEXTCLOUD_URL }}/remote.php/dav/files/${{ secrets.NEXTCLOUD_USER }}/Minecraft/$(date -I | tr -d -)-$(tr . - < state/ec2_ip).pem"
