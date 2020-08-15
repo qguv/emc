@@ -6,7 +6,7 @@ on:
         default: 'eu-central-1'
         required: true
 jobs:
-  build:
+  launch:
     runs-on: ubuntu-20.04
     steps:
 
