@@ -24,15 +24,15 @@ jobs:
 
       - name: Add ops
         working-directory: emc
-        run: sed -i 's/OPS=/OPS=${{ secrets.MINECRAFT_OPS }}/' mc.yaml
+        run: sed -i 's@OPS=@OPS=${{ secrets.MINECRAFT_OPS }}@' mc.yaml
 
       - name: Add motd
         working-directory: emc
-        run: sed 's/MOTD=/MOTD=${{ secrets.MINECRAFT_MOTD }}/' mc.yaml
+        run: sed -i 's@MOTD=@MOTD=${{ secrets.MINECRAFT_MOTD }}@' mc.yaml
 
       - name: Add icon
         working-directory: emc
-        run: sed 's/ICON=/ICON=${{ secrets.MINECRAFT_ICON }}/' mc.yaml
+        run: sed -i 's@ICON=@ICON=${{ secrets.MINECRAFT_ICON }}@' mc.yaml
 
       - name: Launch server
         working-directory: emc
@@ -44,4 +44,4 @@ jobs:
 
       - name: Upload key
         working-directory: emc
-        run: curl -su "${{ secrets.NEXTCLOUD_USER }}:${{ secrets.NEXTCLOUD_PASSWORD }}" -T state/minecraft.pem "https://${{ secrets.NEXTCLOUD_URL }}/remote.php/dav/files/${{ secrets.NEXTCLOUD_USER }}/Minecraft/$(date -I | tr -d -)-$(tr . - < state/ec2_ip).pem"
+        run: curl -su "${{ secrets.NEXTCLOUD_USER }}:${{ secrets.NEXTCLOUD_PASSWORD }}" -T state/minecraft.pem "https://${{ secrets.NEXTCLOUD_DOMAIN }}/remote.php/dav/files/${{ secrets.NEXTCLOUD_USER }}/Minecraft/$(date -I | tr -d -)-$(tr . - < state/ec2_ip).pem"
