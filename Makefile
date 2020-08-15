@@ -18,28 +18,30 @@ info: state/ec2_ip
 	@cat "$<"
 
 .PHONY: ssh
-ssh: state/ec2_ip
+ssh: state/ec2_ip state/minecraft.pem
 	${SSH}
 
-.PHONY: export
-export: | worlds # state/ec2_ip
+.PHONY: stop
+stop: # state/ec2_ip state/minecraft.pem
 	${SSH} sudo systemctl stop minecraft-server
+
+.PHONY: export
+export: stop | worlds # state/ec2_ip
+ifeq (${NO_BACKUP},true)
 	scp -i state/minecraft.pem "core@$$(cat state/ec2_ip):/tmp/minecraft_world.tar.gz" "worlds/minecraft_world_$$(date +%11s).tar.gz"
+endif
 
 .PHONY: save
 save: export # state/ec2_ip state/minecraft.pem
 	${SSH} sudo systemctl start minecraft-server
 
+.PHONY: delete-key
+delete-key: export # state/keypair_name state/minecraft.pem state/minecraft.pem.pub
+	${EC2} delete-key-pair --key-name "$$(cat state/keypair_name)"
+	rm state/keypair_name state/minecraft.pem state/minecraft.pem.pub
 
 .PHONY: kill
-kill: export # state/ec2_instance state/ec2_ip state/keypair_name
-	${EC2} terminate-instances --instance-ids "$$(cat state/ec2_instance)"
-	rm state/ec2_instance state/ec2_ip
-	${EC2} delete-key-pair --key-name "$$(cat state/keypair_name)"
-	rm state/keypair_name state/minecraft.pem
-
-.PHONY: kill9
-kill9: # state/ec2_instance state/ec2_ip
+kill: delete-key # state/ec2_instance state/ec2_ip state/keypair_name
 	${EC2} terminate-instances --instance-ids "$$(cat state/ec2_instance)"
 	rm state/ec2_instance state/ec2_ip
 
@@ -56,10 +58,11 @@ state:
 state/minecraft.pem: | state
 	ssh-keygen -t rsa -b 2048 -f "$@"
 
-state/keypair_name: state/minecraft.pem
+state/keypair_name: state/minecraft.pem # state/minecraft.pem.pub
 	date '+minecraft_%11s' > "$@"
 	${EC2} import-key-pair --key-name "$$(cat "$@")" --public-key-material "$$(cat "$<.pub")"
 
+.INTERMEDIATE: state/mc.json
 state/mc.json: mc.yaml | state
 	docker run -i --rm quay.io/coreos/fcct:release --pretty --strict < "$<" > "$@"
 
