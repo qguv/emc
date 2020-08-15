@@ -1,0 +1,35 @@
+# https://docs.fedoraproject.org/en-US/fedora-coreos/running-containers/
+
+variant: fcos
+version: 1.1.0
+
+systemd:
+  units:
+    - name: minecraft-server.service
+      enabled: yes
+      contents: |
+
+        [Unit]
+        Description=Minecraft server
+        After=network-online.target
+        Wants=network-online.target
+
+        [Install]
+        WantedBy=multi-user.target
+
+        [Service]
+        TimeoutStartSec=0
+        ExecStartPre=/bin/mkdir -p /var/lib/minecraft
+        ExecStartPre=/bin/chown 1000 /var/lib/minecraft
+        ExecStartPre=-/bin/docker create \
+            --name mc \
+            -p 25565:25565 \
+            -v /var/lib/minecraft:/data:Z \
+            -e MEMORY=12G \
+            -e EULA=TRUE \
+            -e ANNOUNCE_PLAYER_ACHIEVEMENTS=true \
+            -e ENABLE_COMMAND_BLOCK=true \
+            -e SNOOPER_ENABLED=false \
+            itzg/minecraft-server
+        ExecStart=/bin/docker start -a mc
+        ExecStopPost=/usr/bin/tar czvf /tmp/minecraft_world.tar.gz /var/lib/minecraft
