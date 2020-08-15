@@ -36,12 +36,12 @@ save: export # state/ec2_ip state/minecraft.pem
 	${SSH} sudo systemctl start minecraft-server
 
 .PHONY: delete-key
-delete-key: export # state/keypair_name state/minecraft.pem state/minecraft.pem.pub
-	${EC2} delete-key-pair --key-name "$$(cat state/keypair_name)"
-	rm state/keypair_name state/minecraft.pem state/minecraft.pem.pub
+delete-key: export # state/ec2_keypair_name state/minecraft.pem state/minecraft.pem.pub
+	${EC2} delete-key-pair --key-name "$$(cat state/ec2_keypair_name)"
+	rm state/ec2_keypair_name state/minecraft.pem state/minecraft.pem.pub
 
 .PHONY: kill
-kill: delete-key # state/ec2_instance state/ec2_ip state/keypair_name
+kill: delete-key # state/ec2_instance state/ec2_ip state/ec2_keypair_name
 	${EC2} terminate-instances --instance-ids "$$(cat state/ec2_instance)"
 	rm state/ec2_instance state/ec2_ip
 
@@ -62,7 +62,7 @@ state:
 state/minecraft.pem: | state
 	ssh-keygen -t rsa -b 2048 -f "$@"
 
-state/keypair_name: state/minecraft.pem # state/minecraft.pem.pub
+state/ec2_keypair_name: state/minecraft.pem # state/minecraft.pem.pub
 	date '+minecraft_%11s' > "$@"
 	${EC2} import-key-pair --key-name "$$(cat "$@")" --public-key-material "fileb://$<.pub"
 
@@ -70,14 +70,14 @@ state/keypair_name: state/minecraft.pem # state/minecraft.pem.pub
 state/mc.json: mc.yaml | state
 	docker run -i --rm quay.io/coreos/fcct:release --pretty --strict < "$<" > "$@"
 
-state/ec2_instance: state/mc.json state/keypair_name
+state/ec2_instance: state/mc.json state/ec2_keypair_name
 	${EC2} describe-security-groups \
 	| jq -e 'any(.SecurityGroups[]; select(.GroupName == "minecraft"))' \
 		|| REGION="${REGION}" SPECS="${OPEN_PORTS}" NAME=minecraft scripts/aws_new_sg.sh
 	${EC2} run-instances \
 		--image-id "${AMI}" \
 		--instance-type ${INSTANCE_TYPE} \
-		--key-name "$$(cat state/keypair_name)" \
+		--key-name "$$(cat state/ec2_keypair_name)" \
 		--user-data "file://$<" \
 		--security-groups minecraft \
 	| jq -re '.Instances[0].InstanceId' > "$@"
@@ -89,3 +89,6 @@ state/ec2_ip: state/ec2_instance
 	do \
 		sleep 1; \
 	done
+
+state/ec2_host: state/ec2_ip state/ec2_keypair_name
+	printf 'Host %s\n\tUser core\n\tHostName %s\n\tIdentityFile ~/Minecraft/keys/%s\n' "$(cat state/ec2_keypair_name)" "$(cat state/ec2_ip)" "$(cat state/ec2_keypair_name)" > host
