@@ -45,6 +45,10 @@ kill: delete-key # state/ec2_instance state/ec2_ip state/keypair_name
 	${EC2} terminate-instances --instance-ids "$$(cat state/ec2_instance)"
 	rm state/ec2_instance state/ec2_ip
 
+.PHONY: list
+list:
+	${EC2} describe-network-interfaces | jq -r '.NetworkInterfaces[] | .Association.PublicIp'
+
 # ,--------------,
 # | file targets |
 # '--------------'
