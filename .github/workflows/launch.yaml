@@ -1,0 +1,31 @@
+name: launch
+on:
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        default: 'eu-central-1'
+        required: true
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+
+      - name: Checkout emc
+        uses: actions/checkout@v2
+        with:
+          path: emc
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ github.event.inputs.aws_region }}
+
+      - name: Launch server
+        working-directory: emc
+        run: make state/ec2_ip
+
+      - name: Notify Quint
+        working-directory: emc
+        run: curl -sX POST "https://push.guvernator.net/message?token=${{ secrets.GOTIFY_TOKEN }}" -F "title=emc" -F "priority=8" -F "message=new server at $(cat state/ec2_ip)"
