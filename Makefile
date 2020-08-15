@@ -91,4 +91,4 @@ state/ec2_ip: state/ec2_instance
 	done
 
 state/ec2_host: state/ec2_ip state/ec2_keypair_name
-	printf 'Host %s\n\tUser core\n\tHostName %s\n\tIdentityFile ~/Minecraft/keys/%s.pem\n' "$(cat state/ec2_keypair_name)" "$(cat state/ec2_ip)" "$(cat state/ec2_keypair_name)" > "$@"
+	printf 'Host %s\n\tUser core\n\tHostName %s\n\tIdentityFile ~/Minecraft/keys/%s.pem\n' "$$(cat state/ec2_keypair_name)" "$$(cat state/ec2_ip)" "$$(cat state/ec2_keypair_name)" > "$@"

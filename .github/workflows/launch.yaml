@@ -52,7 +52,7 @@ jobs:
 
       - name: Notify Quint
         working-directory: emc
-        run: curl -sX POST 'https://push.guvernator.net/message?token=${{ secrets.GOTIFY_TOKEN }}' -F 'title=emc' -F 'priority=8' -F "message=new server at $(cat state/ec2_ip)"
+        run: curl -sX POST 'https://push.guvernator.net/message?token=${{ secrets.GOTIFY_TOKEN }}' -F 'title=emc' -F 'priority=8' -F "message=new server at $(cat state/ec2_ip)" > /dev/null
 
       - name: Upload key
         working-directory: emc
