@@ -27,9 +27,12 @@ systemd:
             -v /var/lib/minecraft:/data:Z \
             -e MEMORY=12G \
             -e EULA=TRUE \
+            -e "ICON=" \
+            -e "OPS=" \
             -e ANNOUNCE_PLAYER_ACHIEVEMENTS=true \
             -e ENABLE_COMMAND_BLOCK=true \
             -e SNOOPER_ENABLED=false \
+            -e "MOTD=" \
             itzg/minecraft-server
         ExecStart=/bin/docker start -a mc
         ExecStopPost=/usr/bin/tar czvf /tmp/minecraft_world.tar.gz /var/lib/minecraft

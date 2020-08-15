@@ -22,6 +22,18 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ github.event.inputs.aws_region }}
 
+      - name: Add ops
+        working-directory: emc
+        run: sed -i 's/OPS=/OPS=${{ secrets.MINECRAFT_OPS }}/' mc.yaml
+
+      - name: Add motd
+        working-directory: emc
+        run: sed 's/MOTD=/MOTD=${{ secrets.MINECRAFT_MOTD }}/' mc.yaml
+
+      - name: Add icon
+        working-directory: emc
+        run: sed 's/ICON=/ICON=${{ secrets.MINECRAFT_ICON }}/' mc.yaml
+
       - name: Launch server
         working-directory: emc
         run: make state/ec2_ip
