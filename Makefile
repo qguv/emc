@@ -64,7 +64,7 @@ state/minecraft.pem: | state
 
 state/keypair_name: state/minecraft.pem # state/minecraft.pem.pub
 	date '+minecraft_%11s' > "$@"
-	${EC2} import-key-pair --key-name "$$(cat "$@")" --public-key-material "file://$<.pub"
+	${EC2} import-key-pair --key-name "$$(cat "$@")" --public-key-material "fileb://$<.pub"
 
 .INTERMEDIATE: state/mc.json
 state/mc.json: mc.yaml | state
