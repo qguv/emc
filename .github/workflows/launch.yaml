@@ -46,7 +46,7 @@ jobs:
 
       - name: Launch server
         working-directory: emc
-        run: make state/host
+        run: make state/ec2_host
         env:
           INSTANCE_TYPE: ${{ github.event.inputs.instance_type }}
 
@@ -60,4 +60,4 @@ jobs:
 
       - name: Upload hosts
         working-directory: emc
-        run: curl -su '${{ secrets.NEXTCLOUD_USER }}:${{ secrets.NEXTCLOUD_PASSWORD }}' -T state/host 'https://${{ secrets.NEXTCLOUD_DOMAIN }}/remote.php/dav/files/${{ secrets.NEXTCLOUD_USER }}/Minecraft/hosts.d/'"$(cat state/keypair_name)"
+        run: curl -su '${{ secrets.NEXTCLOUD_USER }}:${{ secrets.NEXTCLOUD_PASSWORD }}' -T state/ec2_host 'https://${{ secrets.NEXTCLOUD_DOMAIN }}/remote.php/dav/files/${{ secrets.NEXTCLOUD_USER }}/Minecraft/hosts.d/'"$(cat state/keypair_name)"
