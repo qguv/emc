@@ -1,10 +1,11 @@
-# requirements: jq, aws, openssh-client
+# requirements: jq, aws, openssh-client, bash (sorry, need pipefail)
 
 REGION		?= eu-central-1
 INSTANCE_TYPE	?= t3.xlarge
 AMI		?= ami-0ffc658f54d9b6332
 OPEN_PORTS	?= tcp/22 tcp/25565 udp/25565
 
+SHELL=/bin/bash -eo pipefail
 EC2=aws ec2 --region "${REGION}"
 SSH=ssh -i state/minecraft.pem "core@$$(cat state/ec2_ip)"
 
@@ -64,7 +65,7 @@ state/mc.json: mc.yaml | state
 
 state/ec2_instance: state/mc.json state/keypair_name
 	${EC2} describe-security-groups \
-	| jq 'any(.SecurityGroups[]; select(.GroupName == "minecraft"))' \
+	| jq -e 'any(.SecurityGroups[]; select(.GroupName == "minecraft"))' \
 		|| REGION="${REGION}" SPECS="${OPEN_PORTS}" NAME=minecraft scripts/aws_new_sg.sh
 	${EC2} run-instances \
 		--image-id "${AMI}" \
@@ -72,7 +73,7 @@ state/ec2_instance: state/mc.json state/keypair_name
 		--key-name "$$(cat state/keypair_name)" \
 		--user-data "file://$<" \
 		--security-groups minecraft \
-	| jq -r '.Instances[0].InstanceId' > "$@"
+	| jq -re '.Instances[0].InstanceId' > "$@"
 
 state/ec2_ip: state/ec2_instance
 	until \
