@@ -2,7 +2,7 @@
 set -e
 EC2="aws ec2 --region ${REGION:?required}"
 
-$EC2 delete-security-group --group-name "${NAME:?required}"
+$EC2 delete-security-group --group-name "${NAME:?required}" || true
 
 SGID="$(
     $EC2 create-security-group \
