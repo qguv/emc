@@ -5,6 +5,12 @@ on:
       aws_region:
         default: 'eu-central-1'
         required: true
+      instance_type:
+        default: 't3.xlarge'
+        required: true
+      jvm_ram:
+        default: '12G'
+        required: false
 jobs:
   launch:
     runs-on: ubuntu-20.04
@@ -22,6 +28,10 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ github.event.inputs.aws_region }}
 
+      - name: Set JVM RAM
+        working-directory: emc
+        run: sed -i 's@"MEMORY=.*"@"MEMORY=${{ github.event.inputs.jvm_ram }}"@' mc.yaml
+
       - name: Add ops
         working-directory: emc
         run: sed -i 's@OPS=@OPS=${{ secrets.MINECRAFT_OPS }}@' mc.yaml
@@ -37,6 +47,8 @@ jobs:
       - name: Launch server
         working-directory: emc
         run: make state/host
+        env:
+          INSTANCE_TYPE: ${{ github.event.inputs.instance_type }}
 
       - name: Notify Quint
         working-directory: emc

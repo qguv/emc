@@ -25,7 +25,7 @@ systemd:
             --name mc \
             -p 25565:25565 \
             -v /var/lib/minecraft:/data:Z \
-            -e MEMORY=12G \
+            -e "MEMORY=12G" \
             -e EULA=TRUE \
             -e "ICON=" \
             -e "OPS=" \
