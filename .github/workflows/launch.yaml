@@ -44,4 +44,4 @@ jobs:
 
       - name: Upload key
         working-directory: emc
-        run: curl -su "${{ secrets.NEXTCLOUD_USER }}:${{ secrets.NEXTCLOUD_PASSWORD }}" -T state/minecraft.pem "https://${{ secrets.NEXTCLOUD_DOMAIN }}/remote.php/dav/files/${{ secrets.NEXTCLOUD_USER }}/Minecraft/$(date -I | tr -d -)-$(tr . - < state/ec2_ip).pem"
+        run: curl -su "${{ secrets.NEXTCLOUD_USER }}:${{ secrets.NEXTCLOUD_PASSWORD }}" -T state/minecraft.pem "https://${{ secrets.NEXTCLOUD_DOMAIN }}/remote.php/dav/files/${{ secrets.NEXTCLOUD_USER }}/Minecraft/$(cat state/keypair_name)-$(date -I | tr -d -)-$(tr . - < state/ec2_ip).pem"
