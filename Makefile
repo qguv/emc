@@ -27,7 +27,7 @@ stop: # state/ec2_ip state/minecraft.pem
 
 .PHONY: export
 export: stop | worlds # state/ec2_ip
-ifeq (${NO_BACKUP},true)
+ifneq (${NO_BACKUP},true)
 	scp -i state/minecraft.pem "core@$$(cat state/ec2_ip):/tmp/minecraft_world.tar.gz" "worlds/minecraft_world_$$(date +%11s).tar.gz"
 endif
 
