@@ -3,11 +3,10 @@
 import argparse
 from sys import stderr, exit
 from pprint import pprint
-from itertools import zip_longest
-from functools import reduce
 
-from src.meta import EMC_VERSION, DEFAULT_REGION, DEFAULT_INSTANCE_TYPE
+from src.meta import EMC_VERSION, DEFAULT_REGION, DEFAULT_INSTANCE_TYPE, INSTANCE_TYPES, DEFAULT_ICON, DEFAULT_MOTD, DEFAULT_OPEN_PORTS
 from src.db import db_read, db_write
+from src.coreos import generate_config, get_ami
 import src.ec2 as ec2
 
 
@@ -35,7 +34,6 @@ def parse_args():
 
     p['ddns add namecheap'] = sp['ddns add'].add_parser('namecheap', help="set DNS record using namecheap dynamic DNS")
     p['ddns add namecheap'].set_defaults(fn=sc_ddns_add_namecheap)
-    p['ddns add namecheap'].add_argument('subdomain')
     p['ddns add namecheap'].add_argument('domain')
     p['ddns add namecheap'].add_argument('password')
 
@@ -49,17 +47,21 @@ def parse_args():
     p['launch'] = sp[''].add_parser('launch', help="create and start a new server")
     p['launch'].set_defaults(fn=sc_launch)
     p['launch'].add_argument('name', help="a name for this server")
+    p['launch'].add_argument('--ops', metavar="OPLIST", required=True, help="comma-separated list of operator usernames")
     p['launch'].add_argument('--region', default=DEFAULT_REGION, help="AWS region")
     p['launch'].add_argument('--type', default=DEFAULT_INSTANCE_TYPE, help="AWS instance type")
     p['launch'].add_argument('--ddns', metavar="DOMAIN", help="update DDNS for given domain")
+    p['launch'].add_argument('--motd', help="message to show in the server list")
+    p['launch'].add_argument('--icon', metavar="URL", help="URL for an icon to show in the server list")
 
     p['terminate'] = sp[''].add_parser('terminate', help="stop and delete a server")
     p['terminate'].set_defaults(fn=sc_terminate)
-    p['terminate'].add_argument('name', help=f"the name provided when the server was launched")
+    p['terminate'].add_argument('name', help="the name provided when the server was launched")
 
     p['info'] = sp[''].add_parser('info', help="get information about a running server")
     p['info'].set_defaults(fn=sc_info)
-    p['info'].add_argument('name', help=f"the name provided when the server was launched")
+    p['info'].add_argument('name', help="the name provided when the server was launched")
+    p['info'].add_argument('--get-ip', action='store_true', help="query the latest IP and update")
 
     return p[''].parse_args()
 
@@ -72,23 +74,35 @@ def sc_list(args):
 
 
 def sc_info(args):
+    db = db_read()
     try:
-        pprint(db_read()['servers'][args.name])
+        instance = ec2.Instance.from_dict(db['servers'][args.name])
     except KeyError:
         print('ERROR: no server with that name', file=stderr)
         return 1
+
+    if args.get_ip:
+        try:
+            instance.wait_ip()
+            db['servers'][args.name] = instance.to_dict()
+        except TimeoutError as e:
+            print(e, file=stderr)
+            return 5
+
+    db_write(db)
+    pprint(db['servers'][args.name])
 
 
 def sc_launch(args):
     db = db_read()
 
     ddns_url = None
-    if args.DOMAIN:
+    if args.ddns:
         try:
-            ddns_url = db['ddns'][args.DOMAIN]
+            ddns_url = db['ddns'][args.ddns]
         except KeyError:
             print('ERROR: no ddns entry with that domain', file=stderr)
-            return 1
+            return 3
 
     try:
         if args.name in db['servers']:
@@ -97,8 +111,15 @@ def sc_launch(args):
     except KeyError:
         db['servers'] = dict()
 
-    # FIXME actually launch
-    new_server = ec2.Instance(args.region, "instance_id TODO", ec2.Keypair(private=b"TODO", public=b"TODO"), "keypair_name TODO", ddns_url=ddns_url, last_ip=None)
+    ops = args.ops.split(',')
+    memory = INSTANCE_TYPES[args.type]["jvm_memory"]
+    icon = args.icon or DEFAULT_ICON
+    motd = args.motd or DEFAULT_MOTD
+    config = generate_config(memory, icon, ops, motd)
+
+    ami = get_ami(args.region)
+
+    new_server = ec2.Instance.launch(config, args.region, args.type, ami, DEFAULT_OPEN_PORTS, ddns_url)
 
     db['servers'][args.name] = new_server.to_dict()
     db_write(db)
@@ -107,8 +128,9 @@ def sc_launch(args):
 def sc_terminate(args):
     db = db_read()
     try:
-        # FIXME actually kill
-        del db['servers'][args.name]
+        instance = db['servers'].pop(args.name)
+        instance = ec2.Instance.from_dict(instance)
+        instance.terminate()
     except KeyError:
         print('ERROR: no server with that name', file=stderr)
         return 1
@@ -121,7 +143,7 @@ def _ddns_add(domain, url):
     try:
         if domain in db['ddns']:
             print('ERROR: ddns entry with that domain already exists', file=stderr)
-            return 3
+            return 4
     except KeyError:
         db['ddns'] = dict()
 
@@ -134,7 +156,15 @@ def sc_ddns_add_custom(args):
 
 
 def sc_ddns_add_namecheap(args):
-    return _ddns_add(args.domain, f"https://dynamicdns.park-your-domain.com/update?host={args.subdomain}&domain={args.domain}&password={args.password}&ip=0.0.0.0")
+    parts = args.domain.split('.')
+
+    domain_parts = parts[-2:]
+    domain = '.'.join(domain_parts)
+
+    subdomain_parts = parts[:-2]
+    subdomain = '.'.join(subdomain_parts) if subdomain_parts else '@'
+
+    return _ddns_add(args.domain, f"https://dynamicdns.park-your-domain.com/update?host={subdomain}&domain={domain}&password={args.password}&ip=0.0.0.0")
 
 
 def sc_ddns_remove(args):
@@ -143,7 +173,7 @@ def sc_ddns_remove(args):
         del db['ddns'][args.domain]
     except KeyError:
         print('ERROR: no ddns entry with that domain', file=stderr)
-        return 1
+        return 3
 
     db_write(db)
 

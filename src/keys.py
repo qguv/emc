@@ -1,7 +1,7 @@
 from collections import namedtuple
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from subprocess import check_call
+from subprocess import check_call, DEVNULL
 
 Keypair = namedtuple('Keypair', ('private', 'public'))
 
@@ -10,7 +10,7 @@ def ssh_keygen() -> Keypair:
     with TemporaryDirectory() as tmp_dir:
         private_path = Path(tmp_dir) / "k"
         public_path = Path(tmp_dir) / "k.pub"
-        check_call(['ssh-keygen', '-t', 'rsa', '-b', '2048', '-f', str(path)])
+        check_call(['ssh-keygen', '-t', 'rsa', '-b', '2048', '-N', '',  '-f', str(private_path)], stdout=DEVNULL, stderr=DEVNULL)
         with private_path.open('rb') as f:
             private_key = f.read()
         with public_path.open('rb') as f:

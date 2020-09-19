@@ -1,4 +1,5 @@
 import boto3
+from botocore.exceptions import ClientError
 import requests
 
 from time import sleep
@@ -6,7 +7,7 @@ from base64 import b64encode, b64decode
 from uuid import uuid4
 from sys import stderr
 
-from .meta import EMC_VERSION, IP_FETCH_ATTEMPTS
+from .meta import EMC_VERSION, IP_FETCH_ATTEMPTS, DRY_RUN
 from .keys import Keypair, ssh_keygen
 
 _ec2_clients = dict()
@@ -51,40 +52,48 @@ class Instance:
         return cls(
                 d['region'],
                 d['instance_id'],
-                Keypair(**{k: b64decode(v) for k, v in d['keypair']}),
+                Keypair(**{k: b64decode(v) for k, v in d['keypair'].items()}),
                 d['keypair_name'],
                 d['ddns_url'],
                 d['last_ip'],
         )
 
     @classmethod
-    def create(cls, user_data: bytes, region: str, instance: str, ami: str, ports: [['proto', 0]], ddns_url=None) -> 'new instance':
+    def launch(cls, user_data: bytes, region: str, instance_type: str, ami: str, ports: [['proto', 0]], ddns_url=None) -> 'new instance':
         keypair = ssh_keygen()
         keypair_name = upload_public_key(region, keypair.public)
         sg_name = security_group(region, ports)
         user_data_b64 = b64encode(user_data)
 
         ec2 = get_ec2_client(region)
-        instances = ec2.run_instances(
-                ImageId=ami,
-                InstanceType=instance,
-                KeyName=keypair_name,
-                UserData=user_data_b64,
-                SecurityGroups=[sg_name],
-                MinCount=1,
-                MaxCount=1,
-        ).Instances
-        if not instances:
-            raise Exception("Couldn't create it!")
-        instance_id = instances[0].InstanceId
+        if DRY_RUN:
+            instance_id = f"dry-run-{uuid4()}"
+        else:
+            instances = ec2.run_instances(
+                    ImageId=ami,
+                    InstanceType=instance_type,
+                    KeyName=keypair_name,
+                    UserData=user_data_b64,
+                    SecurityGroups=[sg_name],
+                    MinCount=1,
+                    MaxCount=1,
+            )['Instances']
+            if not instances:
+                raise Exception("Couldn't launch it!")
+            instance_id = instances[0]['InstanceId']
 
         instance = cls(region, instance_id, keypair, keypair_name, ddns_url)
+
+        if DRY_RUN:
+            from random import randrange
+            instance.last_ip = f"127.0.{randrange(1, 256)}.{randrange(1, 256)}"
 
         if ddns_url:
             try:
                 instance.update_ddns()
             except TimeoutError as e:
                 print(e, file=stderr)
+                return
 
         return instance
 
@@ -100,32 +109,36 @@ class Instance:
 
 
     def update_ddns(self):
-        assert self.ddns_url
-
         if not self.last_ip:
             self.wait_ip()
+        return self._update_ddns(self.last_ip)
 
+
+    def _update_ddns(self, ip):
         url = self.ddns_url.replace("0.0.0.0", ip)
         requests.get(url).raise_for_status()
 
 
     def terminate(self):
         ec2 = get_ec2_client(self.region)
-        ec2.terminate_instances(InstanceIds=[self.instance_id])
+        if not DRY_RUN:
+            ec2.terminate_instances(InstanceIds=[self.instance_id])
         ec2.delete_key_pair(KeyName=self.keypair_name)
+        if self.ddns_url:
+            self._update_ddns('127.0.0.1')
 
     def get_ip(self):
         ec2 = get_ec2_client(self.region)
         filters = dict(Name="attachment.instance-id", Values=self.instance_id)
-        interfaces = ec2.describe_network_interfaces(Filter=filters).NetworkInterfaces
+        interfaces = ec2.describe_network_interfaces(Filter=filters)['NetworkInterfaces']
         if not interfaces:
             return None
-        self.last_ip = interfaces[0].Association.PublicIp
+        self.last_ip = interfaces[0]['Association']['PublicIp']
         return self.last_ip
 
 
 def upload_public_key(region: str, public_key: bytes) -> 'keypair_name':
-    keypair_name = f"emc{EMC_VERSION}{uuid4()}"
+    keypair_name = f"emc{EMC_VERSION}-{uuid4()}"
     ec2 = get_ec2_client(region)
     ec2.import_key_pair(KeyName=keypair_name, PublicKeyMaterial=public_key)
     return keypair_name
@@ -138,12 +151,13 @@ def security_group(region: str, ports: [('proto', 0)]) -> 'sg_name':
 
     ec2 = get_ec2_client(region)
 
-    has_sg = bool(ec2.describe_security_groups(GroupNames=[name], MaxResults=1).SecurityGroups)
+    try:
+        ec2.describe_security_groups(GroupNames=[name])['SecurityGroups']
 
     # create if doesn't exist
-    if not has_sg:
+    except ClientError:
         desc = "Allow inbound on " + ', '.join((f"port {port} ({proto})" for proto, port in ports))
-        ec2.create_security_group(Description=desc, GroupName=name).GroupId
+        ec2.create_security_group(Description=desc, GroupName=name)['GroupId']
         all_ipv4 = [dict(CidrIp="0.0.0.0/0", Description="all ipv4")]
         ec2.authorize_security_group_ingress(GroupName=name, IpPermissions=[
             dict(IpProtocol=proto, FromPort=port, ToPort=port, IpRanges=all_ipv4) for proto, port in ports
