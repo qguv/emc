@@ -2,14 +2,15 @@
 
 an ephemeral minecraft server
 
+Warning: does not currently save the minecraft world when terminating a machine!
+
 ```sh
 $ aws configure
-$ make
+$ pipenv run ./emc.py launch
 ... play some minecraft
-$ make kill
-... saves world, exports world to ./worlds, terminates aws machine
+... export the world somehow
+$ pipenv run ./emc.py terminate
+... terminates aws machine
 ```
 
-## options
-
-you can edit mc.yaml to add or modify any of the configuration options menitioned [here](https://github.com/itzg/docker-minecraft-server/blob/master/README.md)
+You can set `DRY_RUN` to in `src/meta.py` to `True` for testing.

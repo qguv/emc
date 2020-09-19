@@ -9,6 +9,6 @@ INSTANCE_TYPES = {
         "jvm_memory": "12G",
     },
 }
-DRY_RUN = True
+DRY_RUN = False
 
 DEFAULT_OPEN_PORTS = [("tcp", 22), ("tcp", 25565), ("udp", 25565)]
