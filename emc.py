@@ -3,9 +3,10 @@
 import argparse
 from sys import stderr, exit
 from pprint import pprint
+from datetime import datetime
 
-from src.meta import EMC_VERSION, DEFAULT_REGION, DEFAULT_INSTANCE_TYPE, INSTANCE_TYPES, DEFAULT_ICON, DEFAULT_MOTD, DEFAULT_OPEN_PORTS
-from src.db import db_read, db_write
+from src.meta import EMC_VERSION, DEFAULT_REGION, DEFAULT_INSTANCE_TYPE, INSTANCE_TYPES, DEFAULT_ICON, DEFAULT_MOTD, DEFAULT_OPEN_PORTS, DEFAULT_UNIX_USER
+from src.db import db_read, db_write, xdg_data_home
 from src.coreos import generate_config, get_ami
 import src.ec2 as ec2
 
@@ -49,7 +50,7 @@ def parse_args():
     p['launch'].add_argument('name', help="a name for this server")
     p['launch'].add_argument('--ops', metavar="OPLIST", required=True, help="comma-separated list of operator usernames")
     p['launch'].add_argument('--region', default=DEFAULT_REGION, help="AWS region")
-    p['launch'].add_argument('--type', default=DEFAULT_INSTANCE_TYPE, help="AWS instance type")
+    p['launch'].add_argument('--type', default=DEFAULT_INSTANCE_TYPE, choices=INSTANCE_TYPES.keys(), help="AWS instance type")
     p['launch'].add_argument('--ddns', metavar="DOMAIN", help="update DDNS for given domain")
     p['launch'].add_argument('--motd', help="message to show in the server list")
     p['launch'].add_argument('--icon', metavar="URL", help="URL for an icon to show in the server list")
@@ -62,6 +63,14 @@ def parse_args():
     p['info'].set_defaults(fn=sc_info)
     p['info'].add_argument('name', help="the name provided when the server was launched")
     p['info'].add_argument('--get-ip', action='store_true', help="query the latest IP and update")
+
+    p['ssh'] = sp[''].add_parser('ssh', help="connect to a running server")
+    p['ssh'].set_defaults(fn=sc_ssh)
+    p['ssh'].add_argument('name', help="the name provided when the server was launched")
+
+    p['save'] = sp[''].add_parser('save', help="save a world locally")
+    p['save'].set_defaults(fn=sc_save)
+    p['save'].add_argument('name', help="the name provided when the server was launched")
 
     return p[''].parse_args()
 
@@ -118,6 +127,13 @@ def sc_launch(args):
     config = generate_config(memory, icon, ops, motd)
 
     ami = get_ami(args.region)
+
+    cost = INSTANCE_TYPES[args.type]["hourly_price"]
+
+    print(f"You're launching a {args.type} instance and allocating {memory} of RAM to the JVM.\nThis will cost around:\n  ${cost:8.2f}/hr\n  ${cost*24:8.2f}/day\n  ${cost*24*31:8.2f}/mo\n  ${cost*24*365.25:8.2f}/yr\nuntil you turn it off. Okay? [y/N]", file=stderr)
+    if input().strip().lower() not in ('y', 'yes', 'ok', 'sure', 'fine', 'k'):
+        print("Whew, that was close!", file=stderr)
+        return 6
 
     new_server = ec2.Instance.launch(config, args.region, args.type, ami, DEFAULT_OPEN_PORTS, ddns_url)
 
@@ -182,6 +198,49 @@ def sc_ddns_list(args):
     ddns = db_read().get('ddns', {})
     for domain, url in ddns.items():
         print(f"{domain} -> {url}")
+
+
+def sc_ssh(args):
+    db = db_read()
+    try:
+        instance = ec2.Instance.from_dict(db['servers'][args.name])
+    except KeyError:
+        print('ERROR: no server with that name', file=stderr)
+        return 1
+
+    if not instance.last_ip:
+        try:
+            instance.wait_ip()
+        except TimeoutError:
+            print(e, file=stderr)
+            return 5
+
+    ssh(DEFAULT_UNIX_USER, instance.last_ip, instance.keypair.public)
+
+
+def sc_save(args):
+    db = db_read()
+    try:
+        instance = ec2.Instance.from_dict(db['servers'][args.name])
+    except KeyError:
+        print('ERROR: no server with that name', file=stderr)
+        return 1
+
+    worlds_dir = xdg_data_home() / 'emc' / 'worlds'
+    worlds_dir.mkdir(parents=True, exist_ok=True)
+    world_name = datetime.utcnow().isoformat(timespec='seconds').replace(':', '')
+    world_path = worlds_dir / world_name
+
+    if not instance.last_ip:
+        try:
+            instance.wait_ip()
+        except TimeoutError:
+            print(e, file=stderr)
+            return 5
+
+    ssh(DEFAULT_UNIX_USER, instance.last_ip, instance.keypair.public, ["sudo", "systemctl", "stop", "minecraft-server"])
+    scp_pull(DEFAULT_UNIX_USER, instance.last_ip, instance.keypair.public, "/tmp/minecraft_world.tar.gz", str(world_path))
+    ssh(DEFAULT_UNIX_USER, instance.last_ip, public_key, ["sudo", "systemctl", "start", "minecraft-server"])
 
 
 if __name__ == '__main__':
