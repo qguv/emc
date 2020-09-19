@@ -1,3 +1,6 @@
+from tempfile import TemporaryDirectory
+from pathlib import Path
+from subprocess import check_output
 import requests
 
 header = '''\
@@ -36,6 +39,17 @@ escaped_double_quote = '\\"'
 
 
 def generate_config(memory: '12G', icon: 'url', ops: ['username'], motd: str):
+    yaml_config = template_config(memory, icon, ops, motd)
+    with TemporaryDirectory() as tmp_dir:
+        yaml_path = Path(tmp_dir) / 'c.yaml'
+        with yaml_path.open('wb') as f:
+            f.write(yaml_config)
+        with yaml_path.open('rb') as f:
+            json_config = check_output(['docker', 'run', '-i', '--rm', 'quay.io/coreos/fcct:release', '--pretty', '--strict'], stdin=f, text=False)
+    return json_config
+
+
+def template_config(memory: '12G', icon: 'url', ops: ['username'], motd: str):
     config = header
     config += ' --name mc'
     config += ' -p 25565:25565'

@@ -129,11 +129,11 @@ class Instance:
 
     def get_ip(self):
         ec2 = get_ec2_client(self.region)
-        filters = dict(Name="attachment.instance-id", Values=self.instance_id)
-        interfaces = ec2.describe_network_interfaces(Filter=filters)['NetworkInterfaces']
-        if not interfaces:
+        filters = [dict(Name="attachment.instance-id", Values=[self.instance_id])]
+        try:
+            self.last_ip = ec2.describe_network_interfaces(Filters=filters)['NetworkInterfaces'][0]['Association']['PublicIp']
+        except (KeyError, ValueError):
             return None
-        self.last_ip = interfaces[0]['Association']['PublicIp']
         return self.last_ip
 
 

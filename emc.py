@@ -8,6 +8,7 @@ from datetime import datetime
 from src.meta import EMC_VERSION, DEFAULT_REGION, DEFAULT_INSTANCE_TYPE, INSTANCE_TYPES, DEFAULT_ICON, DEFAULT_MOTD, DEFAULT_OPEN_PORTS, DEFAULT_UNIX_USER
 from src.db import db_read, db_write, xdg_data_home
 from src.coreos import generate_config, get_ami
+from src.keys import ssh, scp_pull
 import src.ec2 as ec2
 
 
