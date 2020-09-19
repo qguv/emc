@@ -1,6 +1,7 @@
 EMC_VERSION = "0.0.1"
 DEFAULT_REGION = "eu-central-1"
 DEFAULT_INSTANCE_TYPE = "t3.xlarge"
+IP_FETCH_ATTEMPTS = 30
 AMIS = {
         "eu-central-1": {
             "t3.xlarge": "ami-0ffc658f54d9b6332",

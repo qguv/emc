@@ -1,9 +1,12 @@
 import boto3
+import requests
 
+from time import sleep
 from base64 import b64encode, b64decode
 from uuid import uuid4
+from sys import stderr
 
-from .meta import EMC_VERSION
+from .meta import EMC_VERSION, IP_FETCH_ATTEMPTS
 from .keys import Keypair, ssh_keygen
 
 _ec2_clients = dict()
@@ -25,11 +28,12 @@ def get_ec2_client(region: str, client_store=None):
 
 
 class Instance:
-    def __init__(self, region: str, instance_id: str, keypair: Keypair, keypair_name: str, last_ip=None):
+    def __init__(self, region: str, instance_id: str, keypair: Keypair, keypair_name: str, ddns_url=None, last_ip=None):
         self.region = region
         self.instance_id = instance_id
         self.keypair = keypair
         self.keypair_name = keypair_name
+        self.ddns_url = ddns_url
         self.last_ip = last_ip
 
     def to_dict(self):
@@ -38,6 +42,7 @@ class Instance:
                 instance_id=self.instance_id,
                 keypair={k: str(b64encode(v), encoding='ascii') for k, v in self.keypair._asdict().items()},
                 keypair_name=self.keypair_name,
+                ddns_url=self.ddns_url,
                 last_ip=self.last_ip,
         )
 
@@ -48,11 +53,12 @@ class Instance:
                 d['instance_id'],
                 Keypair(**{k: b64decode(v) for k, v in d['keypair']}),
                 d['keypair_name'],
+                d['ddns_url'],
                 d['last_ip'],
         )
 
     @classmethod
-    def create(cls, user_data: bytes, region: str, instance: str, ami: str, ports: [['proto', 0]]) -> 'new instance':
+    def create(cls, user_data: bytes, region: str, instance: str, ami: str, ports: [['proto', 0]], ddns_url=None) -> 'new instance':
         keypair = ssh_keygen()
         keypair_name = upload_public_key(region, keypair.public)
         sg_name = security_group(region, ports)
@@ -69,9 +75,39 @@ class Instance:
                 MaxCount=1,
         ).Instances
         if not instances:
-            raise Exception("Couldn't do it!")
+            raise Exception("Couldn't create it!")
         instance_id = instances[0].InstanceId
-        return cls(region, instance_id, keypair, keypair_name)
+
+        instance = cls(region, instance_id, keypair, keypair_name, ddns_url)
+
+        if ddns_url:
+            try:
+                instance.update_ddns()
+            except TimeoutError as e:
+                print(e, file=stderr)
+
+        return instance
+
+
+    def wait_ip(self, attempts=IP_FETCH_ATTEMPTS):
+        for i in range(IP_FETCH_ATTEMPTS):
+            if i:
+                sleep(1)
+            ip = self.get_ip()
+            if ip:
+                return ip
+        raise TimeoutError(f"Couldn't get IP after {attempts} attempts")
+
+
+    def update_ddns(self):
+        assert self.ddns_url
+
+        if not self.last_ip:
+            self.wait_ip()
+
+        url = self.ddns_url.replace("0.0.0.0", ip)
+        requests.get(url).raise_for_status()
+
 
     def terminate(self):
         ec2 = get_ec2_client(self.region)
