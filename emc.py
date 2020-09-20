@@ -4,11 +4,13 @@ import argparse
 from sys import stderr, exit
 from pprint import pprint
 from datetime import datetime
+from subprocess import CalledProcessError
 
-from src.meta import EMC_VERSION, DEFAULT_REGION, DEFAULT_INSTANCE_TYPE, INSTANCE_TYPES, DEFAULT_ICON, DEFAULT_MOTD, DEFAULT_OPEN_PORTS, DEFAULT_UNIX_USER
+from src.meta import EMC_VERSION, DEFAULT_REGION, DEFAULT_INSTANCE_TYPE, INSTANCE_TYPES, DEFAULT_ICON, DEFAULT_MOTD, DEFAULT_OPEN_PORTS
 from src.db import db_read, db_write, xdg_data_home
 from src.coreos import generate_config, get_ami
 from src.keys import ssh, scp_pull
+from src.mc import mc_start, mc_stop, mc_download_world
 import src.ec2 as ec2
 
 
@@ -69,9 +71,32 @@ def parse_args():
     p['ssh'].set_defaults(fn=sc_ssh)
     p['ssh'].add_argument('name', help="the name provided when the server was launched")
 
-    p['save'] = sp[''].add_parser('save', help="save a world locally")
-    p['save'].set_defaults(fn=sc_save)
-    p['save'].add_argument('name', help="the name provided when the server was launched")
+    p['mc'] = sp[''].add_parser('mc', help="control minecraft process")
+    sp['mc'] = p['mc'].add_subparsers(required=True, dest='mc_subcommand')
+
+    p['mc status'] = sp['mc'].add_parser('status', help="check status of minecraft process")
+    p['mc status'].set_defaults(fn=sc_mc_status)
+    p['mc status'].add_argument('name', help="the name provided when the server was launched")
+
+    p['mc save'] = sp['mc'].add_parser('save', help="save a world locally")
+    p['mc save'].set_defaults(fn=sc_mc_save)
+    p['mc save'].add_argument('name', help="the name provided when the server was launched")
+
+    p['mc console'] = sp['mc'].add_parser('console', help="connect to the minecraft console")
+    p['mc console'].set_defaults(fn=sc_mc_console)
+    p['mc console'].add_argument('name', help="the name provided when the server was launched")
+
+    p['mc start'] = sp['mc'].add_parser('start', help="start the minecraft process")
+    p['mc start'].set_defaults(fn=sc_mc_start)
+    p['mc start'].add_argument('name', help="the name provided when the server was launched")
+
+    p['mc restart'] = sp['mc'].add_parser('restart', help="stop and then start the minecraft process")
+    p['mc restart'].set_defaults(fn=sc_mc_restart)
+    p['mc restart'].add_argument('name', help="the name provided when the server was launched")
+
+    p['mc stop'] = sp['mc'].add_parser('stop', help="stop the minecraft process")
+    p['mc stop'].set_defaults(fn=sc_mc_stop)
+    p['mc stop'].add_argument('name', help="the name provided when the server was launched")
 
     return p[''].parse_args()
 
@@ -95,11 +120,11 @@ def sc_info(args):
         try:
             instance.wait_ip()
             db['servers'][args.name] = instance.to_dict()
+            db_write(db)
         except TimeoutError as e:
             print(e, file=stderr)
             return 5
 
-    db_write(db)
     pprint(db['servers'][args.name])
 
 
@@ -212,14 +237,16 @@ def sc_ssh(args):
     if not instance.last_ip:
         try:
             instance.wait_ip()
-        except TimeoutError:
+            db['servers'][args.name] = instance.to_dict()
+            db_write(db)
+        except TimeoutError as e:
             print(e, file=stderr)
             return 5
 
-    ssh(DEFAULT_UNIX_USER, instance.last_ip, instance.keypair.public)
+    ssh(instance.last_ip, instance.keypair.private)
 
 
-def sc_save(args):
+def sc_mc_save(args):
     db = db_read()
     try:
         instance = ec2.Instance.from_dict(db['servers'][args.name])
@@ -227,21 +254,80 @@ def sc_save(args):
         print('ERROR: no server with that name', file=stderr)
         return 1
 
+    if not instance.last_ip:
+        try:
+            instance.wait_ip()
+        except TimeoutError as e:
+            print(e, file=stderr)
+            return 5
+
     worlds_dir = xdg_data_home() / 'emc' / 'worlds'
     worlds_dir.mkdir(parents=True, exist_ok=True)
     world_name = datetime.utcnow().isoformat(timespec='seconds').replace(':', '')
-    world_path = worlds_dir / world_name
+    world_path = worlds_dir / ('minecraft_world_' + world_name + '.tar.gz')
+
+    print("pausing minecraft process...", file=stderr, end=' ', flush=True)
+    mc_stop(instance)
+    print("ok")
+
+    print(f"downloading world from server {args.name} to local path {world_path}:", file=stderr)
+    print("scp connecting...", file=stderr, flush=True, end='\r')
+    mc_download_world(instance, world_path)
+    print(f"download succeeded", file=stderr)
+
+    print("resuming minecraft process...", file=stderr, end=' ', flush=True)
+    mc_start(instance)
+    print("ok", file=stderr)
+
+
+def _run_cmd(server_nickname, cmd):
+    db = db_read()
+    try:
+        instance = ec2.Instance.from_dict(db['servers'][args.name])
+    except KeyError:
+        print('ERROR: no server with that name', file=stderr)
+        return 1
 
     if not instance.last_ip:
         try:
             instance.wait_ip()
-        except TimeoutError:
+            db['servers'][args.name] = instance.to_dict()
+            db_write(db)
+        except TimeoutError as e:
             print(e, file=stderr)
             return 5
 
-    ssh(DEFAULT_UNIX_USER, instance.last_ip, instance.keypair.public, ["sudo", "systemctl", "stop", "minecraft-server"])
-    scp_pull(DEFAULT_UNIX_USER, instance.last_ip, instance.keypair.public, "/tmp/minecraft_world.tar.gz", str(world_path))
-    ssh(DEFAULT_UNIX_USER, instance.last_ip, public_key, ["sudo", "systemctl", "start", "minecraft-server"])
+    ssh(instance.last_ip, instance.keypair.private, cmd)
+
+
+def sc_mc_console(args):
+    try:
+        return _run_cmd(args.name, ['sudo', 'docker', 'exec', '-i', 'mc', 'rcon-cli'])
+    except CalledProcessError as e:
+        if e.returncode == 137:
+            return 0
+        raise e
+
+
+def sc_mc_status(args):
+    try:
+        return _run_cmd(args.name, ['sudo', 'systemctl', 'status', 'minecraft-server.service'])
+    except CalledProcessError as e:
+        if e.returncode == 3:
+            return 0
+        raise e
+
+
+def sc_mc_start(args):
+    return _run_cmd(args.name, ['sudo', 'systemctl', 'start', 'minecraft-server.service'])
+
+
+def sc_mc_restart(args):
+    return _run_cmd(args.name, ['sudo', 'systemctl', 'restart', 'minecraft-server.service'])
+
+
+def sc_mc_stop(args):
+    return _run_cmd(args.name, ['sudo', 'systemctl', 'stop', 'minecraft-server.service'])
 
 
 if __name__ == '__main__':

@@ -63,7 +63,6 @@ class Instance:
         keypair = ssh_keygen()
         keypair_name = upload_public_key(region, keypair.public)
         sg_name = security_group(region, ports)
-        user_data_b64 = b64encode(user_data)
 
         ec2 = get_ec2_client(region)
         if DRY_RUN:
@@ -73,7 +72,7 @@ class Instance:
                     ImageId=ami,
                     InstanceType=instance_type,
                     KeyName=keypair_name,
-                    UserData=user_data_b64,
+                    UserData=user_data,
                     SecurityGroups=[sg_name],
                     MinCount=1,
                     MaxCount=1,
