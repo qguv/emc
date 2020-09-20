@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import argparse
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from sys import stderr, exit
 from pprint import pprint
 from datetime import datetime
@@ -18,12 +18,56 @@ def parse_args():
     p = dict()
     sp = dict()
 
-    p[''] = argparse.ArgumentParser(description="ephemeral minecraft server")
+    p[''] = ArgumentParser(description="ephemeral minecraft server")
     p[''].add_argument('--version', action='version', version=EMC_VERSION)
     sp[''] = p[''].add_subparsers(required=True, dest='subcommand')
 
-    p['ddns'] = sp[''].add_parser('ddns', help='automatically set DNS records to IPs of launched servers')
-    sp['ddns'] = p['ddns'].add_subparsers(required=True, dest='ddns_subcommand')
+    p['ddns'] = sp[''].add_parser(
+            'ddns',
+            formatter_class=RawDescriptionHelpFormatter,
+            help='commands for automatically setting DNS records to launched server IPs',
+    )
+    sp['ddns'] = p['ddns'].add_subparsers(
+        required=True,
+        dest='ddns_subcommand',
+        description='''\
+DDNS is a way to dynamically set the DNS records of a domain. If you own a
+domain name, and your DNS provider supports DDNS, you can configure emc to
+change the records for you when it launches new servers.
+
+If you use namecheap's FreeDNS, you can use the 'ddns add namecheap' subcommand
+with the DDNS password found in the page for your domain in the namecheap
+dashboard. Then set the DDNS info in emc like this:
+
+    emc ddns add namecheap some.domain.name 0123456789abcdef
+
+If you use a different DNS provider, you can use the 'ddns add custom'
+subcommand. You will first need to determine which URL must be hit (using a GET
+request) to set the DNS record. The current IP will need to be in that URL
+somewhere; put 0.0.0.0 in as a template. When launching a new server, its IP
+will replace 0.0.0.0 in the URL. Your domain name or subdomain may also need to
+be part of the URL; please enter this into the string yourself. Then you can
+set the DDNS info in emc like this:
+
+    emc ddns add custom some.domain.name https://some.ddns.url/?blah=0.0.0.0&rest=blah
+
+To set the ddns records for a new server, pass the --ddns flag to launch, like
+this:
+
+    emc launch my-server --ddns some.domain.name
+
+Now emc will attempt to set the DDNS record just after the server is launched,
+once we have a stable IP.
+
+If you want to set a server up with DDNS after it's been launched, use
+something like this:
+
+    emc ddns link some.domain.name my-server  # TODO
+
+You can also force an update like this:
+
+    emc ddns update my-server  # TODO
+''')
 
     p['ddns list'] = sp['ddns'].add_parser('list', help="show available DDNS entries")
     p['ddns list'].set_defaults(fn=sc_ddns_list)
@@ -44,6 +88,15 @@ def parse_args():
     p['ddns remove'] = sp['ddns'].add_parser('remove', help="delete new DDNS entry")
     p['ddns remove'].set_defaults(fn=sc_ddns_remove)
     p['ddns remove'].add_argument('domain')
+
+    p['ddns link'] = sp['ddns'].add_parser('link', help="set a server's domain after it's been launched")
+    p['ddns link'].set_defaults(fn=sc_ddns_link)
+    p['ddns link'].add_argument('domain')
+    p['ddns link'].add_argument('name', help="the name provided when the server was launched")
+
+    p['ddns update'] = sp['ddns'].add_parser('update', help="update a server's DDNS record after it's been launched")
+    p['ddns update'].set_defaults(fn=sc_ddns_update)
+    p['ddns update'].add_argument('name', help="the name provided when the server was launched")
 
     p['list'] = sp[''].add_parser('list', help="show names of running servers")
     p['list'].set_defaults(fn=sc_list)
@@ -237,11 +290,11 @@ def sc_ssh(args):
     if not instance.last_ip:
         try:
             instance.wait_ip()
-            db['servers'][args.name] = instance.to_dict()
-            db_write(db)
         except TimeoutError as e:
             print(e, file=stderr)
             return 5
+        db['servers'][args.name] = instance.to_dict()
+        db_write(db)
 
     ssh(instance.last_ip, instance.keypair.private)
 
@@ -260,6 +313,8 @@ def sc_mc_save(args):
         except TimeoutError as e:
             print(e, file=stderr)
             return 5
+        db['servers'][args.name] = instance.to_dict()
+        db_write(db)
 
     worlds_dir = xdg_data_home() / 'emc' / 'worlds'
     worlds_dir.mkdir(parents=True, exist_ok=True)
@@ -291,11 +346,11 @@ def _run_cmd(server_nickname, cmd):
     if not instance.last_ip:
         try:
             instance.wait_ip()
-            db['servers'][args.name] = instance.to_dict()
-            db_write(db)
         except TimeoutError as e:
             print(e, file=stderr)
             return 5
+        db['servers'][args.name] = instance.to_dict()
+        db_write(db)
 
     ssh(instance.last_ip, instance.keypair.private, cmd)
 
@@ -328,6 +383,44 @@ def sc_mc_restart(args):
 
 def sc_mc_stop(args):
     return _run_cmd(args.name, ['sudo', 'systemctl', 'stop', 'minecraft-server.service'])
+
+
+def sc_ddns_link(args):
+    db = db_read()
+    try:
+        instance = ec2.Instance.from_dict(db['servers'][args.name])
+    except KeyError:
+        print('ERROR: no server with that name', file=stderr)
+        return 1
+
+    if not instance.last_ip:
+        instance.wait_ip()
+        db['servers'][args.name] = instance.to_dict()
+        db_write(db)
+    domain, name
+
+
+def sc_ddns_update(args):
+    db = db_read()
+    try:
+        instance_spec = db['servers'][args.name]
+    except KeyError:
+        print('ERROR: no server with that name', file=stderr)
+        return 1
+
+    if not instance_spec.get('ddns_url'):
+        print('ERROR: ddns not set up for that server', file=stderr)
+        return 7
+
+    instance = ec2.Instance.from_dict(instance_spec)
+    try:
+        instance.update_ddns()
+    except TimeoutError as e:
+        print(e, file=stderr)
+        return 5
+
+    db['servers'][args.name] = instance.to_dict()
+    db_write(db)
 
 
 if __name__ == '__main__':
