@@ -62,11 +62,7 @@ once we have a stable IP.
 If you want to set a server up with DDNS after it's been launched, use
 something like this:
 
-    emc ddns link some.domain.name my-server  # TODO
-
-You can also force an update like this:
-
-    emc ddns update my-server  # TODO
+    emc ddns link some.domain.name my-server
 ''')
 
     p['ddns list'] = sp['ddns'].add_parser('list', help="show available DDNS entries")
@@ -93,6 +89,10 @@ You can also force an update like this:
     p['ddns link'].set_defaults(fn=sc_ddns_link)
     p['ddns link'].add_argument('domain')
     p['ddns link'].add_argument('name', help="the name provided when the server was launched")
+
+    p['ddns unlink'] = sp['ddns'].add_parser('unlink', help="remove DDNS information from a domain")
+    p['ddns unlink'].set_defaults(fn=sc_ddns_unlink)
+    p['ddns unlink'].add_argument('name', help="the name provided when the server was launched")
 
     p['ddns update'] = sp['ddns'].add_parser('update', help="update a server's DDNS record after it's been launched")
     p['ddns update'].set_defaults(fn=sc_ddns_update)
@@ -129,6 +129,7 @@ You can also force an update like this:
 
     p['mc status'] = sp['mc'].add_parser('status', help="check status of minecraft process")
     p['mc status'].set_defaults(fn=sc_mc_status)
+    p['mc status'].add_argument('-f', action='store_true', help="follow minecraft process output")
     p['mc status'].add_argument('name', help="the name provided when the server was launched")
 
     p['mc save'] = sp['mc'].add_parser('save', help="save a world locally")
@@ -165,18 +166,21 @@ def sc_info(args):
     db = db_read()
     try:
         instance = ec2.Instance.from_dict(db['servers'][args.name])
-    except KeyError:
+    except KeyError as e:
+        print(e)
         print('ERROR: no server with that name', file=stderr)
         return 1
 
     if args.get_ip:
         try:
             instance.wait_ip()
-            db['servers'][args.name] = instance.to_dict()
-            db_write(db)
         except TimeoutError as e:
             print(e, file=stderr)
             return 5
+
+        # last_ip may have updated
+        db['servers'][args.name] = instance.to_dict()
+        db_write(db)
 
     pprint(db['servers'][args.name])
 
@@ -293,6 +297,8 @@ def sc_ssh(args):
         except TimeoutError as e:
             print(e, file=stderr)
             return 5
+
+        # last_ip may have updated
         db['servers'][args.name] = instance.to_dict()
         db_write(db)
 
@@ -313,6 +319,8 @@ def sc_mc_save(args):
         except TimeoutError as e:
             print(e, file=stderr)
             return 5
+
+        # last_ip may have updated
         db['servers'][args.name] = instance.to_dict()
         db_write(db)
 
@@ -349,6 +357,8 @@ def _run_cmd(server_nickname, cmd):
         except TimeoutError as e:
             print(e, file=stderr)
             return 5
+
+        # last_ip may have updated
         db['servers'][args.name] = instance.to_dict()
         db_write(db)
 
@@ -365,6 +375,13 @@ def sc_mc_console(args):
 
 
 def sc_mc_status(args):
+
+    if args.f:
+        try:
+            return _run_cmd(args.name, ['sudo', 'journalctl', '-fu', 'minecraft-server.service'])
+        except KeyboardInterrupt:
+            return 0
+
     try:
         return _run_cmd(args.name, ['sudo', 'systemctl', 'status', 'minecraft-server.service'])
     except CalledProcessError as e:
@@ -388,16 +405,45 @@ def sc_mc_stop(args):
 def sc_ddns_link(args):
     db = db_read()
     try:
-        instance = ec2.Instance.from_dict(db['servers'][args.name])
+        ddns_url = db['ddns'][args.domain]
+    except KeyError:
+        print('ERROR: no ddns entry with that domain', file=stderr)
+        return 3
+
+    try:
+        instance_spec = db['servers'][args.name]
     except KeyError:
         print('ERROR: no server with that name', file=stderr)
         return 1
 
-    if not instance.last_ip:
-        instance.wait_ip()
-        db['servers'][args.name] = instance.to_dict()
-        db_write(db)
-    domain, name
+    instance_spec['ddns_url'] = ddns_url
+
+    instance = ec2.Instance.from_dict(instance_spec)
+    try:
+        instance.update_ddns()
+    except TimeoutError as e:
+        print(e, file=stderr)
+        return 5
+
+    db['servers'][args.name] = instance.to_dict()
+    db_write(db)
+
+
+def sc_ddns_unlink(args):
+    db = db_read()
+    try:
+        instance_spec = db['servers'][args.name]
+    except KeyError:
+        print('ERROR: no server with that name', file=stderr)
+        return 1
+
+    try:
+        instance_spec.pop('ddns_url')
+    except KeyError:
+        print('ERROR: server does not have ddns configured', file=stderr)
+        return 8
+
+    db_write(db)
 
 
 def sc_ddns_update(args):
@@ -419,6 +465,7 @@ def sc_ddns_update(args):
         print(e, file=stderr)
         return 5
 
+    # last_ip may have updated
     db['servers'][args.name] = instance.to_dict()
     db_write(db)
 

@@ -54,8 +54,8 @@ class Instance:
                 d['instance_id'],
                 Keypair(**{k: b64decode(v) for k, v in d['keypair'].items()}),
                 d['keypair_name'],
-                d['ddns_url'],
-                d['last_ip'],
+                d.get('ddns_url'),
+                d.get('last_ip'),
         )
 
     @classmethod
