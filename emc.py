@@ -214,7 +214,7 @@ def sc_launch(args):
     cost = INSTANCE_TYPES[args.type]["hourly_price"]
 
     print(f"You're launching a {args.type} instance and allocating {memory} of RAM to the JVM.\nThis will cost around:\n  ${cost:8.2f}/hr\n  ${cost*24:8.2f}/day\n  ${cost*24*31:8.2f}/mo\n  ${cost*24*365.25:8.2f}/yr\nuntil you turn it off. Okay? [y/N]", file=stderr)
-    if input().strip().lower() not in ('y', 'yes', 'ok', 'sure', 'fine', 'k'):
+    if input().strip().lower() not in ('y', 'yes', 'ok', 'sure', 'fine', 'k', 'whatever', 'whatevs', 'ok boomer'):
         print("Whew, that was close!", file=stderr)
         return 6
 
